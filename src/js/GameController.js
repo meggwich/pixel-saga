@@ -14,6 +14,7 @@ export default class GameController {
     this.stateService = stateService;
     this.playerTeam = null;
     this.enemyTeam = null;
+    this.positions = new Set();
   }
 
   init() {
@@ -48,6 +49,10 @@ export default class GameController {
 
     // Отрисовка
     this.gamePlay.redrawPositions([...this.playerTeam, ...this.enemyTeam]);
+
+    this.gamePlay.addCellEnterListener(this.onCellEnter.bind(this));
+    this.gamePlay.addCellLeaveListener(this.onCellLeave.bind(this));
+    this.gamePlay.addCellClickListener(this.onCellClick.bind(this));
   }
 
   // Вспомогательная функция для получения случайных позиций
@@ -58,6 +63,7 @@ export default class GameController {
       const position = availablePositions[randomIndex];
       if (!positions.includes(position)) {
         positions.push(position);
+        this.positions.add(position);
       }
     }
     return positions;
@@ -68,10 +74,36 @@ export default class GameController {
   }
 
   onCellEnter(index) {
-    // TODO: react to mouse enter
+    if (this.positions.has(index)) {
+      // Проверка персонажей игрока
+      for (const positionedCharacter of this.playerTeam) {
+        if (positionedCharacter.position === index) {
+          const character = positionedCharacter.character;
+          this.gamePlay.showCellTooltip(
+            `🎖${character.level} ⚔${character.attack} 🛡${character.defence} ❤${character.health}`,
+            index,
+          );
+          return;
+        }
+      }
+
+      // Проверка персонажей соперника
+      for (const positionedCharacter of this.enemyTeam) {
+        if (positionedCharacter.position === index) {
+          const character = positionedCharacter.character;
+          this.gamePlay.showCellTooltip(
+            `🎖${character.level} ⚔${character.attack} 🛡${character.defence} ❤${character.health}`,
+            index,
+          );
+          return;
+        }
+      }
+    }
   }
 
   onCellLeave(index) {
-    // TODO: react to mouse leave
+    if (this.positions.has(index)) {
+      this.gamePlay.hideCellTooltip(index);
+    }
   }
 }
