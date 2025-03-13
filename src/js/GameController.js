@@ -23,32 +23,24 @@ export default class GameController {
   init() {
     this.gamePlay.drawUi(themes.prairie);
 
-    const playerTypes = [Bowman, Swordsman, Magician];
-    const enemyTypes = [Daemon, Undead, Vampire];
+    // Генерация команд с использованием объекта для передачи параметров
+    this.playerTeam = this.generateTeamWithPositions({
+      types: [Bowman, Swordsman, Magician],
+      maxLevel: 1,
+      characterCount: 2,
+      availablePositions: [
+        0, 1, 8, 9, 16, 17, 24, 25, 32, 33, 40, 41, 48, 49, 56, 57,
+      ],
+    });
 
-    // Генерация команд
-    this.playerTeam = generateTeam(playerTypes, 1, 2);
-    this.enemyTeam = generateTeam(enemyTypes, 1, 2);
-
-    // Размещение персонажей игрока в столбцах 1 и 2
-    const playerPositions = this.getRandomPositions(
-      [0, 1, 8, 9, 16, 17, 24, 25, 32, 33, 40, 41, 48, 49, 56, 57],
-      this.playerTeam.characters.length,
-    );
-    this.playerTeam = this.playerTeam.characters.map(
-      (character, index) =>
-        new PositionedCharacter(character, playerPositions[index]),
-    );
-
-    // Размещение персонажей соперника в столбцах 7 и 8
-    const enemyPositions = this.getRandomPositions(
-      [6, 7, 14, 15, 22, 23, 30, 31, 38, 39, 46, 47, 54, 55, 62, 62],
-      this.enemyTeam.characters.length,
-    );
-    this.enemyTeam = this.enemyTeam.characters.map(
-      (character, index) =>
-        new PositionedCharacter(character, enemyPositions[index]),
-    );
+    this.enemyTeam = this.generateTeamWithPositions({
+      types: [Daemon, Undead, Vampire],
+      maxLevel: 1,
+      characterCount: 2,
+      availablePositions: [
+        6, 7, 14, 15, 22, 23, 30, 31, 38, 39, 46, 47, 54, 55, 62, 62,
+      ],
+    });
 
     // Отрисовка
     this.gamePlay.redrawPositions([...this.playerTeam, ...this.enemyTeam]);
@@ -58,7 +50,23 @@ export default class GameController {
     this.gamePlay.addCellClickListener(this.onCellClick.bind(this));
   }
 
-  // Вспомогательная функция для получения случайных позиций
+  generateTeamWithPositions({
+    types,
+    maxLevel,
+    characterCount,
+    availablePositions,
+  }) {
+    const team = generateTeam(types, maxLevel, characterCount);
+    const positions = this.getRandomPositions(
+      availablePositions,
+      team.characters.length,
+    );
+    return team.characters.map(
+      (character, index) =>
+        new PositionedCharacter(character, positions[index]),
+    );
+  }
+
   getRandomPositions(availablePositions, count) {
     const positions = [];
     while (positions.length < count) {
@@ -73,53 +81,36 @@ export default class GameController {
   }
 
   onCellClick(index) {
-    if (this.positions.has(index)) {
-      for (const positionedCharacter of this.playerTeam) {
-        if (positionedCharacter.position === index) {
-          for (const posChar of this.playerTeam) {
-            this.gamePlay.deselectCell(posChar.position);
-          }
-          this.gamePlay.selectCell(index);
-          return;
-        }
-      }
-
-      for (const positionedCharacter of this.enemyTeam) {
-        if (positionedCharacter.position === index) {
-          GamePlay.showError("Был нажат персонаж противника");
-          return;
-        }
-      }
-    } else {
+    if (!this.positions.has(index)) {
       GamePlay.showError("Была нажата пустая ячейка");
+      return;
+    }
+
+    const playerCharacter = this.findCharacterByPosition(
+      this.playerTeam,
+      index,
+    );
+    if (playerCharacter) {
+      this.deselectAllCells();
+      this.gamePlay.selectCell(index);
+      return;
+    }
+
+    const enemyCharacter = this.findCharacterByPosition(this.enemyTeam, index);
+    if (enemyCharacter) {
+      GamePlay.showError("Был нажат персонаж противника");
     }
   }
 
   onCellEnter(index) {
-    if (this.positions.has(index)) {
-      // Проверка персонажей игрока
-      for (const positionedCharacter of this.playerTeam) {
-        if (positionedCharacter.position === index) {
-          const character = positionedCharacter.character;
-          this.gamePlay.showCellTooltip(
-            `🎖${character.level} ⚔${character.attack} 🛡${character.defence} ❤${character.health}`,
-            index,
-          );
-          return;
-        }
-      }
+    if (!this.positions.has(index)) return;
 
-      // Проверка персонажей соперника
-      for (const positionedCharacter of this.enemyTeam) {
-        if (positionedCharacter.position === index) {
-          const character = positionedCharacter.character;
-          this.gamePlay.showCellTooltip(
-            `🎖${character.level} ⚔${character.attack} 🛡${character.defence} ❤${character.health}`,
-            index,
-          );
-          return;
-        }
-      }
+    const character = this.findCharacterByPosition(
+      [...this.playerTeam, ...this.enemyTeam],
+      index,
+    );
+    if (character) {
+      this.showCharacterTooltip(character, index);
     }
   }
 
@@ -127,5 +118,22 @@ export default class GameController {
     if (this.positions.has(index)) {
       this.gamePlay.hideCellTooltip(index);
     }
+  }
+
+  findCharacterByPosition(team, position) {
+    return team.find((posChar) => posChar.position === position)?.character;
+  }
+
+  deselectAllCells() {
+    this.playerTeam.forEach((posChar) =>
+      this.gamePlay.deselectCell(posChar.position),
+    );
+  }
+
+  showCharacterTooltip(character, index) {
+    this.gamePlay.showCellTooltip(
+      `🎖${character.level} ⚔${character.attack} 🛡${character.defence} ❤${character.health}`,
+      index,
+    );
   }
 }
