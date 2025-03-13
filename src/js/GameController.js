@@ -9,6 +9,8 @@ import Vampire from "./characters/Vampire";
 import PositionedCharacter from "./PositionedCharacter";
 import GameState from "./GameState";
 import GamePlay from "./GamePlay";
+import cursors from "./cursors";
+import { parametrs, coordinates } from "./constants";
 
 export default class GameController {
   constructor(gamePlay, stateService) {
@@ -18,6 +20,7 @@ export default class GameController {
     this.enemyTeam = null;
     this.positions = new Set();
     this.savedState = GameState.from({ currentTurn: "player" });
+    this.selected = null;
   }
 
   init() {
@@ -81,10 +84,10 @@ export default class GameController {
   }
 
   onCellClick(index) {
-    if (!this.positions.has(index)) {
-      GamePlay.showError("Была нажата пустая ячейка");
-      return;
-    }
+    // if (this.selected && this.positions.has(index)) {
+    //   const enemyCharacter = this.findCharacterByPosition(this.enemyTeam, index);
+    //   enemyCharacter != - 1 ?
+    // }
 
     const playerCharacter = this.findCharacterByPosition(
       this.playerTeam,
@@ -93,6 +96,7 @@ export default class GameController {
     if (playerCharacter) {
       this.deselectAllCells();
       this.gamePlay.selectCell(index);
+      this.selected = playerCharacter;
       return;
     }
 
@@ -103,25 +107,81 @@ export default class GameController {
   }
 
   onCellEnter(index) {
-    if (!this.positions.has(index)) return;
+    this.gamePlay.setCursor(cursors.notallowed);
+    if (this.selected) {
+      const type = this.selected.character.type;
+      const position = this.selected.position;
+      if (!this.positions.has(index)) {
+        const allowedCellsForMove = this.getAvailableMovingCells(
+          type,
+          position,
+        );
+        if (allowedCellsForMove.has(index)) {
+          this.gamePlay.selectCell(index, "green");
+          this.gamePlay.setCursor(cursors.pointer);
+        }
+      } else if (this.cellCanBeAttacked(type, position, index)) {
+        const enemyPositionedCharacter = this.findCharacterByPosition(
+          this.enemyTeam,
+          index,
+        );
+        if (enemyPositionedCharacter != undefined) {
+          this.gamePlay.selectCell(index, "red");
+          this.gamePlay.setCursor(cursors.crosshair);
+        }
+      }
+    }
 
-    const character = this.findCharacterByPosition(
-      [...this.playerTeam, ...this.enemyTeam],
+    const playerCharacter = this.findCharacterByPosition(
+      [...this.playerTeam],
       index,
     );
-    if (character) {
-      this.showCharacterTooltip(character, index);
+    const enemyCharacter = this.findCharacterByPosition(
+      [...this.enemyTeam],
+      index,
+    );
+    if (playerCharacter) {
+      this.showCharacterTooltip(playerCharacter.character, index);
+      this.gamePlay.setCursor(cursors.pointer);
+    }
+
+    if (enemyCharacter) {
+      this.showCharacterTooltip(enemyCharacter.character, index);
     }
   }
 
   onCellLeave(index) {
     if (this.positions.has(index)) {
       this.gamePlay.hideCellTooltip(index);
+      if (
+        this.selected &&
+        this.cellCanBeAttacked(
+          this.selected.character.type,
+          this.selected.position,
+          index,
+        )
+      ) {
+        const enemyPositionedCharacter = this.findCharacterByPosition(
+          this.enemyTeam,
+          index,
+        );
+        if (enemyPositionedCharacter != undefined) {
+          this.gamePlay.deselectCell(index);
+        }
+      }
+    } else if (this.selected) {
+      const allowedCellsForMove = this.getAvailableMovingCells(
+        this.selected.character.type,
+        this.selected.position,
+      );
+      if (allowedCellsForMove.has(index)) {
+        this.gamePlay.deselectCell(index);
+      }
     }
   }
 
   findCharacterByPosition(team, position) {
-    return team.find((posChar) => posChar.position === position)?.character;
+    return team.find((posChar) => posChar.position === position);
   }
 
   deselectAllCells() {
@@ -135,5 +195,33 @@ export default class GameController {
       `🎖${character.level} ⚔${character.attack} 🛡${character.defence} ❤${character.health}`,
       index,
     );
+  }
+
+  getAvailableMovingCells(type, current) {
+    const { maxMoveDistance } = parametrs[type];
+    let set = new Set();
+    const currentX = current % 8;
+    const currentY = Math.floor(current / 8);
+    for (let i = 1; i <= maxMoveDistance; i++) {
+      coordinates.forEach(([x, y]) => {
+        const newX = currentX + x * i;
+        const newY = currentY + y * i;
+        if (newX >= 0 && newX < 8 && newY >= 0 && newY < 8) {
+          set.add(newX + newY * 8);
+        }
+      });
+    }
+    return set.difference(this.positions);
+  }
+  cellCanBeAttacked(type, current, target) {
+    const { maxAttackDistance: d } = parametrs[type];
+    const currentX = current % 8;
+    const currentY = Math.floor(current / 8);
+    const targetX = target % 8;
+    const targetY = Math.floor(target / 8);
+    const xPass = targetX >= currentX - d && targetX <= currentX + d;
+    const yPass = targetY >= currentY - d && targetY <= currentY + d;
+    if (xPass && yPass) return true;
+    return false;
   }
 }
