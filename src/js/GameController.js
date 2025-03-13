@@ -7,6 +7,8 @@ import Daemon from "./characters/Daemon";
 import Undead from "./characters/Undead";
 import Vampire from "./characters/Vampire";
 import PositionedCharacter from "./PositionedCharacter";
+import GameState from "./GameState";
+import GamePlay from "./GamePlay";
 
 export default class GameController {
   constructor(gamePlay, stateService) {
@@ -15,6 +17,7 @@ export default class GameController {
     this.playerTeam = null;
     this.enemyTeam = null;
     this.positions = new Set();
+    this.savedState = GameState.from({ currentTurn: "player" });
   }
 
   init() {
@@ -70,7 +73,26 @@ export default class GameController {
   }
 
   onCellClick(index) {
-    // TODO: react to click
+    if (this.positions.has(index)) {
+      for (const positionedCharacter of this.playerTeam) {
+        if (positionedCharacter.position === index) {
+          for (const posChar of this.playerTeam) {
+            this.gamePlay.deselectCell(posChar.position);
+          }
+          this.gamePlay.selectCell(index);
+          return;
+        }
+      }
+
+      for (const positionedCharacter of this.enemyTeam) {
+        if (positionedCharacter.position === index) {
+          GamePlay.showError("Был нажат персонаж противника");
+          return;
+        }
+      }
+    } else {
+      GamePlay.showError("Была нажата пустая ячейка");
+    }
   }
 
   onCellEnter(index) {
