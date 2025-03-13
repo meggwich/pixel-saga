@@ -84,10 +84,21 @@ export default class GameController {
   }
 
   onCellClick(index) {
-    // if (this.selected && this.positions.has(index)) {
-    //   const enemyCharacter = this.findCharacterByPosition(this.enemyTeam, index);
-    //   enemyCharacter != - 1 ?
-    // }
+    if (
+      this.selected &&
+      this.getAvailableMovingCells(
+        this.selected.character.type,
+        this.selected.position,
+      ).has(index)
+    ) {
+      this.gamePlay.deselectCell(this.selected.position);
+      this.selected.position = index;
+      this.gamePlay.deselectCell(index);
+      this.gamePlay.redrawPositions([...this.playerTeam, ...this.enemyTeam]);
+      this.selected = null;
+      this.savedState = GameState.from({ currentTurn: "computer" });
+      return;
+    }
 
     const playerCharacter = this.findCharacterByPosition(
       this.playerTeam,
