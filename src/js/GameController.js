@@ -86,6 +86,31 @@ export default class GameController {
   onCellClick(index) {
     if (
       this.selected &&
+      this.cellCanBeAttacked(
+        this.selected.character.type,
+        this.selected.position,
+        index,
+      )
+    ) {
+      const enemyPositionedCharacter = this.findCharacterByPosition(
+        this.enemyTeam,
+        index,
+      );
+      if (enemyPositionedCharacter != undefined) {
+        const attacker = this.selected.character;
+        const target = enemyPositionedCharacter.character;
+        const damage = Math.max(
+          attacker.attack - target.defence,
+          attacker.attack * 0.1,
+        );
+        this.gamePlay.redrawPositions([...this.playerTeam, ...this.enemyTeam]);
+        this.gamePlay.showDamage(index, damage);
+        target.health -= damage;
+      }
+    }
+
+    if (
+      this.selected &&
       this.getAvailableMovingCells(
         this.selected.character.type,
         this.selected.position,
@@ -111,10 +136,10 @@ export default class GameController {
       return;
     }
 
-    const enemyCharacter = this.findCharacterByPosition(this.enemyTeam, index);
-    if (enemyCharacter) {
-      GamePlay.showError("Был нажат персонаж противника");
-    }
+    // const enemyCharacter = this.findCharacterByPosition(this.enemyTeam, index);
+    // if (enemyCharacter) {
+    //   // GamePlay.showError("Был нажат персонаж противника");
+    // }
   }
 
   onCellEnter(index) {
