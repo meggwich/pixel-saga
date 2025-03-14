@@ -7,7 +7,7 @@ import Daemon from "./characters/Daemon";
 import Undead from "./characters/Undead";
 import Vampire from "./characters/Vampire";
 import PositionedCharacter from "./PositionedCharacter";
-import GameState from "./GameState";
+import { GameState } from "./GameState";
 import cursors from "./cursors";
 import { parametrs, coordinates } from "./constants";
 
@@ -18,7 +18,10 @@ export default class GameController {
     this.playerTeam = null;
     this.enemyTeam = null;
     this.positions = new Set();
-    this.savedState = GameState.from({ currentTurn: "player" });
+    this.savedState = GameState.from({
+      currentTurn: "player",
+      currentLevel: 1,
+    });
     this.selected = null;
   }
 
@@ -40,7 +43,7 @@ export default class GameController {
       maxLevel: 1,
       characterCount: 2,
       availablePositions: [
-        6, 7, 14, 15, 22, 23, 30, 31, 38, 39, 46, 47, 54, 55, 62, 62,
+        6, 7, 14, 15, 22, 23, 30, 31, 38, 39, 46, 47, 54, 55, 62, 63,
       ],
     });
 
@@ -83,17 +86,28 @@ export default class GameController {
   }
 
   onCellClick(index) {
+    // Check if it's computer's turn
+    if (this.savedState.currentTurn === "computer") {
+      return;
+    }
+
     if (
       this.selected &&
       this.getAvailableMovingCells(this.selected).has(index)
     ) {
       // Если клетка свободна, перемещаем персонажа
       this.gamePlay.deselectCell(this.selected.position);
+      const oldPosition = this.selected.position;
+      this.positions.delete(oldPosition);
       this.selected.position = index;
+      this.positions.add(index);
       this.gamePlay.deselectCell(index);
       this.gamePlay.redrawPositions([...this.playerTeam, ...this.enemyTeam]);
       this.selected = null;
-      this.savedState = GameState.from({ currentTurn: "computer" });
+      this.savedState = GameState.from({
+        currentTurn: "computer",
+        currentLevel: this.savedState.currentLevel,
+      });
       this.computerTurn();
       return;
     }
@@ -110,26 +124,34 @@ export default class GameController {
           attacker.attack - target.defence,
           attacker.attack * 0.1,
         );
-        this.gamePlay.redrawPositions([...this.playerTeam, ...this.enemyTeam]);
-        this.gamePlay.showDamage(index, damage);
-        target.health -= damage;
-        if (target.health <= 0) {
-          this.enemyTeam = this.enemyTeam.filter(
-            (posChar) => posChar.character !== target,
-          );
+        this.gamePlay.showDamage(index, damage).then(() => {
+          target.health -= damage;
+          if (target.health <= 0) {
+            this.positions.delete(enemyPositionedCharacter.position);
+            this.enemyTeam = this.enemyTeam.filter(
+              (posChar) => posChar.character !== target,
+            );
+          }
           this.gamePlay.deselectCell(this.selected.position);
           this.gamePlay.redrawPositions([
             ...this.playerTeam,
             ...this.enemyTeam,
           ]);
-          this.gamePlay.deselectCell(enemyPositionedCharacter.position);
-          this.positions = this.positions.difference(
-            new Set([enemyPositionedCharacter.position]),
-          );
-        }
-        this.savedState = GameState.from({ currentTurn: "computer" });
-        this.computerTurn();
+          this.selected = null;
+
+          // Check if level is completed
+          if (this.enemyTeam.length === 0) {
+            this.checkForLevelUp();
+          } else {
+            this.savedState = GameState.from({
+              currentTurn: "computer",
+              currentLevel: this.savedState.currentLevel,
+            });
+            this.computerTurn();
+          }
+        });
       }
+      return;
     }
 
     const playerCharacter = this.findCharacterByPosition(
@@ -239,8 +261,10 @@ export default class GameController {
         }
       });
     }
-    return set.difference(this.positions);
+    // Fix Set difference operation
+    return new Set([...set].filter((x) => !this.positions.has(x)));
   }
+
   cellCanBeAttacked(attacker, targetIndex) {
     const type = attacker.character.type;
     const currentIndex = attacker.position;
@@ -256,47 +280,95 @@ export default class GameController {
   }
 
   computerTurn() {
-    // Выбираем случайного персонажа из команды компьютера
-    const attacker =
-      this.enemyTeam[Math.floor(Math.random() * this.enemyTeam.length)];
+    if (this.enemyTeam.length === 0) {
+      this.savedState = GameState.from({
+        currentTurn: "player",
+        currentLevel: this.savedState.currentLevel,
+      });
+      return;
+    }
 
-    // Получаем доступные клетки для перемещения
-    const availableMoveCells = this.getAvailableMovingCells(attacker);
+    // Try to find an attacker that can attack a player character
+    let canAttack = false;
+    let bestAttacker = null;
+    let bestTarget = null;
+    let maxDamage = 0;
 
-    // Ищем ближайшую цель для атаки
-    const target = this.findNearestTarget(attacker);
+    // Find the best attack opportunity
+    for (const attacker of this.enemyTeam) {
+      for (const target of this.playerTeam) {
+        if (this.cellCanBeAttacked(attacker, target.position)) {
+          const damage = Math.max(
+            attacker.character.attack - target.character.defence,
+            attacker.character.attack * 0.1,
+          );
 
-    if (target) {
-      // Проверяем, находится ли цель в радиусе атаки
-      if (this.cellCanBeAttacked(attacker, target.position)) {
-        // Атакуем цель
-        this.attack(attacker, target);
-      } else {
-        // Если цель не в радиусе атаки, перемещаемся ближе к цели
+          // If this attack would kill the target or deals more damage than previous options
+          if (target.character.health <= damage || damage > maxDamage) {
+            canAttack = true;
+            bestAttacker = attacker;
+            bestTarget = target;
+            maxDamage = damage;
+          }
+        }
+      }
+    }
+
+    if (canAttack && bestAttacker && bestTarget) {
+      // Attack the target
+      this.attack(bestAttacker, bestTarget);
+    } else {
+      // If no attack is possible, move towards nearest target
+      const attacker = this.selectBestAttacker();
+      const target = this.findNearestTarget(attacker);
+
+      if (target) {
+        // Get available cells for movement
+        const availableMoveCells = this.getAvailableMovingCells(attacker);
+
+        // Move towards target
         this.moveTowardsTarget(attacker, target, availableMoveCells);
       }
     }
 
-    // Передаем ход игроку
-    this.savedState = GameState.from({ currentTurn: "player" });
+    // Check if game is over
+    if (this.playerTeam.length === 0) {
+      this.checkForGameOver();
+    } else {
+      // Передаем ход игроку
+      this.savedState = GameState.from({
+        currentTurn: "player",
+        currentLevel: this.savedState.currentLevel,
+      });
+    }
+  }
+
+  selectBestAttacker() {
+    // Select the character with highest attack value
+    return this.enemyTeam.reduce((best, current) => {
+      return !best || current.character.attack > best.character.attack
+        ? current
+        : best;
+    }, null);
   }
 
   moveTowardsTarget(attacker, target, availableMoveCells) {
-    let bestCell = attacker.position;
-    let minDistance = this.calculateDistance(
-      attacker.position,
-      target.position,
-    );
+    if (availableMoveCells.size === 0) return;
 
-    availableMoveCells.forEach((cell) => {
+    let bestCell = attacker.position;
+    let minDistance = Infinity;
+
+    // Convert Set to Array for iteration
+    const moveCells = Array.from(availableMoveCells);
+    for (const cell of moveCells) {
       const distance = this.calculateDistance(cell, target.position);
       if (distance < minDistance) {
         minDistance = distance;
         bestCell = cell;
       }
-    });
+    }
 
-    // Перемещаем персонажа на выбранную клетку, если она свободна
+    // Перемещаем персонажа на выбранную клетку, если она отличается от текущей
     if (bestCell !== attacker.position) {
       this.positions.delete(attacker.position);
       attacker.position = bestCell;
@@ -307,6 +379,8 @@ export default class GameController {
 
   // Метод для поиска ближайшей цели
   findNearestTarget(attacker) {
+    if (this.playerTeam.length === 0) return null;
+
     let nearestTarget = null;
     let minDistance = Infinity;
 
@@ -356,5 +430,75 @@ export default class GameController {
       this.positions = this.positions.difference(new Set([target.position]));
       this.gamePlay.redrawPositions([...this.playerTeam, ...this.enemyTeam]);
     }
+  }
+
+  checkForLevelUp() {
+    if (this.enemyTeam.length === 0) {
+      this.levelUpCharacters();
+      this.startNewLevel();
+    }
+  }
+
+  levelUpCharacters() {
+    this.playerTeam.forEach((positionedCharacter) => {
+      const character = positionedCharacter.character;
+      character.level += 1;
+      character.health = Math.min(character.level + 80, 100);
+      character.attack = Math.max(
+        character.attack,
+        character.attack * ((80 + character.health) / 100),
+      );
+      character.defence = Math.max(
+        character.defence,
+        character.defence * ((80 + character.health) / 100),
+      );
+    });
+  }
+
+  startNewLevel() {
+    const themes = ["prairie", "desert", "arctic", "mountain"];
+    const currentThemeIndex = themes.indexOf(this.gamePlay.theme);
+    const nextTheme = themes[(currentThemeIndex + 1) % themes.length];
+    this.gamePlay.drawUi(nextTheme);
+
+    // Генерация новой команды противников
+    this.enemyTeam = this.generateTeamWithPositions({
+      types: [Daemon, Undead, Vampire],
+      maxLevel: this.savedState.currentLevel + 1,
+      characterCount: 2,
+      availablePositions: [
+        6, 7, 14, 15, 22, 23, 30, 31, 38, 39, 46, 47, 54, 55, 62, 62,
+      ],
+    });
+
+    // Перерисовка позиций
+    this.gamePlay.redrawPositions([...this.playerTeam, ...this.enemyTeam]);
+  }
+  checkForGameOver() {
+    if (this.playerTeam.length === 0) {
+      this.gameOver();
+    } else if (this.savedState.currentLevel >= 4) {
+      this.gameOver(true);
+    }
+  }
+
+  gameOver(isVictory = false) {
+    this.gamePlay.blockField();
+    if (isVictory) {
+      this.gamePlay.showMessage("Поздравляем! Вы прошли все уровни!");
+    } else {
+      this.gamePlay.showMessage("Игра окончена. Вы проиграли.");
+    }
+  }
+
+  newGame() {
+    this.playerTeam = null;
+    this.enemyTeam = null;
+    this.positions = new Set();
+    this.savedState = GameState.from({
+      currentTurn: "player",
+      currentLevel: 1,
+    });
+    this.init();
   }
 }
